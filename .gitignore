@@ -1,2 +1,12 @@
-#Picture
-frontend/src/assets/images/
+# Picture
+FrontEnd/src/assets/images/
+
+# Node
+ChatwootAutomation/node_modules/
+
+# Maven 
+BackEnd/.mvn/
+BackEnd/!mvnw
+BackEnd/!mvnw.cmd
+
+.vscode/
