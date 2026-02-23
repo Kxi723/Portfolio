@@ -2,7 +2,7 @@
 FrontEnd/src/assets/images/
 
 # Node
-ChatwootAutomation/node_modules/
+**/node_modules/
 
 # Maven 
 BackEnd/.mvn/
