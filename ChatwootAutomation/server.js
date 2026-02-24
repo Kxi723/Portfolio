@@ -7,7 +7,17 @@ const port = 3000;
 const bodyParser = require('body-parser');
 const axios = require('axios');
 
-// Use 'body-parser' middleware to parse JSON requests
+/** 
+ * Port configuration for the Express server.
+ * This port should be exposed publicly for Chatwoot to send webhooks.
+ * (via ngrok: https://joye-unflagging-albertine.ngrok-free.dev/)
+ * @type {number} 
+ */
+const port = 3000;
+
+const app = express();
+
+// Use 'body-parser' middleware to parse incoming JSON requests
 app.use(bodyParser.json());
 
 const API_ACCESS_TOKEN = '2s14c6WNKQKJw44MCzAxm9wh';
@@ -94,10 +104,16 @@ const setConversationTeamAndLabel = async (conversationId, messageContent) => {
     }
 };
 
-// Source: https://www.chatwoot.com/hc/user-guide/articles/1677693021-how-to-use-webhooks
-// Chatwoot send POST request to this endpoint, only 'message_created' event is triggered
-// URL customise at Chatwoot -> Settings -> Integrations
-app.post('/customlink', (req, res) => {
+/**
+ * Webhook endpoint for capturing Chatwoot events.
+ * Listens for new messages and triggers the automated assignment logic.
+ * 
+ * @name POST /webhook
+ * @function
+ * @param {express.Request} req - Express request object containing the Chatwoot event payload.
+ * @param {express.Response} res - Express response object for acknowledging the webhook.
+ */
+app.post('/webhook', (req, res) => {
     const data = req.body;
     console.log(">> Received event:", data.event);
 
@@ -117,7 +133,9 @@ app.post('/customlink', (req, res) => {
 });
 
 
-// Start the server
+/**
+ * Initializes and starts the Express HTTP server.
+ */
 app.listen(port, () => {
     console.log(`>> Server is running on http://localhost:${port}`);
 });
