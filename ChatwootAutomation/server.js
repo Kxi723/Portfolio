@@ -1,30 +1,41 @@
+/**
+ * @file Chatwoot Webhook Automation Server.
+ * Listens for incoming Chatwoot webhooks and automatically assigns 
+ * conversations to specific teams based on message content.
+ */
+
+// -------------------------------------------------
+// Import Modules
+// -------------------------------------------------
 const express = require('express');
-const app = express();
-
-// define a port that ngrok can public it then chatwoot backend can listen to it
-const port = 3000;
-
 const bodyParser = require('body-parser');
 const axios = require('axios');
 
-/** 
+/**
  * Port configuration for the Express server.
  * This port should be exposed publicly for Chatwoot to send webhooks.
  * (via ngrok: https://joye-unflagging-albertine.ngrok-free.dev/)
- * @type {number} 
+ * @type {number}
  */
-const port = 3000;
+const PORT = 3000;
 
 const app = express();
 
-// Use 'body-parser' middleware to parse incoming JSON requests
+// Use 'body-parser' middleware to parse JSON requests
 app.use(bodyParser.json());
 
-const API_ACCESS_TOKEN = '2s14c6WNKQKJw44MCzAxm9wh';
+// -------------------------------------------------
+// Chatwoot API Configuration
+// -------------------------------------------------
+require('dotenv').config();
+const API_ACCESS_TOKEN = process.env.API_ACCESS_TOKEN;
 const APP_HOST = 'https://app.chatwoot.com';
-const ACCOUNT_ID = 151642;
+const ACCOUNT_ID = process.env.ACCOUNT_ID;
 
-// Axios instance with default headers
+/**
+ * Axios instance pre-configured with the Chatwoot base URL
+ * and required authentication headers.
+ */
 const api = axios.create({
     baseURL: `${APP_HOST}/api/v1/accounts/${ACCOUNT_ID}`,
     headers: {
@@ -33,109 +44,98 @@ const api = axios.create({
     }
 });
 
-const teamIDs = {
-    team1: 11193,
-    team2: 11257
-};
+/**
+ * Analyzes the content of an incoming message to determine 
+ * the appropriate team assignment.
+ * @param {string} message - The content of the received message.
+ * @returns { teamID } - The team ID or undefined if no rules match.
+ */
+const teamMatching = (message) => {
+    // Convert to lowercase for case-insensitive matching
+    const content = message.toLowerCase();
 
-const getTeamToBeAssignedTo = (messageContent) => {
-    const content = messageContent.toLowerCase(); // Convert to lowercase for case-insensitive matching
-
-    if (content.includes('abc') || content.includes('test') || content.includes('price')) {
-        return {
-            teamId: teamIDs.team1,
-            label: ['banned'],
-        };
+    if (content.includes('camera') || content.includes('lens')) {
+        return 11193;
     }
 
-    if (content.includes('123') || content.includes('test123') || content.includes('abc123')) {
-        return {
-            teamId: teamIDs.team2,
-            label: ['test123']
-        };
+    if (content.includes('how much') || content.includes('price')) {
+        return 11257;
     }
 
-    return {}; // Return empty object if no match found
+    // Return undefined if no match found
+    return;
 };
 
-const setConversationTeamAndLabel = async (conversationId, messageContent) => {
+/**
+ * Assigns a conversation to a specific team based on the first message received.
+ * @param {number} userID - The unique identifier of the Chatwoot conversation.
+ * @param {string} message - The content of the incoming message to analyze.
+ * @param {string} userName - The user name displayed in the incoming message.
+ * @returns {Promise<void>} Resolves when the assignment is complete or if assignment is skipped.
+ */
+const assignTeam = async (userID, message, userName) => {
     try {
-        console.log(`>> Processing conversation ${conversationId}...`);
-
-        // Get conversation details
-        // GET /api/v1/accounts/{account_id}/conversations/{conversation_id}
-        const convResponse = await api.get(`/conversations/${conversationId}`);
-        const meta = convResponse.data.meta || {};
+        // Fetch conversation details to check its current routing status
+        const payload = await api.get(`/conversations/${userID}`);
+        const teamData = payload.data.meta || {};
 
         // Only assign if not already assigned to a team
-        if (!meta.team) {
-            const { teamId, label } = getTeamToBeAssignedTo(messageContent);
+        if (!teamData.team) {
+            const teamID = teamMatching(message);
 
-            if (teamId) {
-                console.log(`>> Assigning conversation ${conversationId} to team ${teamId} with label ${label}`);
-
-                // Assign Team
-                // POST /api/v1/accounts/{account_id}/conversations/{conversation_id}/assignments
-                await api.post(`/conversations/${conversationId}/assignments`, {
-                    team_id: teamId
-                });
-
-                // Add Labels
-                // POST /api/v1/accounts/{account_id}/conversations/{conversation_id}/labels
-                if (label && label.length > 0) {
-                    await api.post(`/conversations/${conversationId}/labels`, {
-                        labels: label
-                    });
-                }
-
-                console.log('>> Assignment successful');
-            } else {
-                console.log('No matching team found for message content.');
+            if (teamID) {
+                // Assign the team
+                await api.post(`/conversations/${userID}/assignments`, { team_id: teamID });
+                console.log(`>> Assigning '${userName}' successfully.`);
             }
-        } else {
-            console.log(`Conversation ${conversationId} already assigned to team ${meta.team.id}`);
+            else { console.log('<< No matching team found.'); }
         }
-    } catch (error) {
-        if (error.response) {
-            console.error('Error processing conversation:', error.response.status, error.response.data);
-        } else {
-            console.error('Error processing conversation:', error.message);
+        else {
+            console.log(`<< '${userName}' has already been assigned to '${teamData.team.name}'.`);
         }
     }
+
+    catch (error) {
+        console.error('>> Error:', error.message);
+    }
 };
+
 
 /**
  * Webhook endpoint for capturing Chatwoot events.
  * Listens for new messages and triggers the automated assignment logic.
- * 
- * @name POST /webhook
+ * @name POST /customlink
  * @function
  * @param {express.Request} req - Express request object containing the Chatwoot event payload.
  * @param {express.Response} res - Express response object for acknowledging the webhook.
  */
-app.post('/webhook', (req, res) => {
+app.post('/customlink', (req, res) => {
+    // Events & URL are set at Chatwoot -> Settings -> Integrations.
+    // Online Source: https://www.chatwoot.com/hc/user-guide/articles/1677693021-how-to-use-webhooks
+
+    // Ensure these data won't changed within the execution
     const data = req.body;
-    console.log(">> Received event:", data.event);
+    const userName = data.sender?.name ?? 'Unknown';
+    const userID = data.conversation?.id;
+    const message = data.content ?? '';
 
-    const { conversation: { id: conversationId }, message_type: messageType, content } = req.body;
+    console.log("<< Received event:", data.event);
 
-    if (messageType !== 'incoming') {
-        console.log("stop here.")
+    // Only process incoming messages. Ignore outgoing/agent messages.
+    if (data.message_type != 'incoming') {
         return res.send();
     }
 
-    console.log(`>> Received new message from ID ${conversationId}: ${content}`);
+    console.log(`<< Received new message from '${userName}'.`);
 
-    // Process async but respond immediately to avoid timeout
-    setConversationTeamAndLabel(conversationId, content || '');
+    assignTeam(userID, message || '', userName);
 
     res.send();
 });
 
-
 /**
  * Initializes and starts the Express HTTP server.
  */
-app.listen(port, () => {
-    console.log(`>> Server is running on http://localhost:${port}`);
+app.listen(PORT, () => {
+    console.log(`>> Server is running on http://localhost:${PORT}`);
 });
